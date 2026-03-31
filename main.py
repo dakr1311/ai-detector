@@ -2,13 +2,13 @@ import os
 import pickle
 import uvicorn
 from fastapi import FastAPI, HTTPException
-from fastapi.middleware.cors import CORSMiddleware # Required for Flutter
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
 # 1. Initialize FastAPI
 app = FastAPI()
 
-# 2. ADD CORS (This prevents many connection errors from Flutter)
+# 2. Enable CORS (Vital for Flutter apps to connect to the cloud)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -16,48 +16,53 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# 3. Load your uploaded models
-# Note: Using absolute path handling for cloud servers
+# 3. Securely load your models
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-try:
-    with open(os.path.join(BASE_DIR, 'tfidf_vectorizer.pkl'), 'rb') as f:
-        vectorizer = pickle.load(f)
-    with open(os.path.join(BASE_DIR, 'ai_text_model.pkl'), 'rb') as f:
-        model = pickle.load(f)
-    print("Models loaded successfully!")
-except Exception as e:
-    print(f"CRITICAL ERROR: Could not load models: {e}")
+tfidf_path = os.path.join(BASE_DIR, 'tfidf_vectorizer.pkl')
+model_path = os.path.join(BASE_DIR, 'ai_text_model.pkl')
 
-# 4. Define the request structure
+try:
+    with open(tfidf_path, 'rb') as f:
+        vectorizer = pickle.load(f)
+    with open(model_path, 'rb') as f:
+        model = pickle.load(f)
+    print("SUCCESS: TF-IDF and AI Model loaded.")
+except Exception as e:
+    print(f"CRITICAL ERROR: {e}")
+
 class TextRequest(BaseModel):
     text: str
 
-# 5. Home Route (Use this to check if server is alive in a browser)
+# 4. Root Route (Check this in your browser to avoid 404)
 @app.get("/")
-def read_root():
-    return {"status": "Server is Online"}
+def check_status():
+    return {"status": "Server is Online", "endpoint": "/predict"}
 
-# 6. Predict Route
+# 5. Prediction Logic
 @app.post("/predict")
 async def predict(request: TextRequest):
     if not request.text.strip():
-        raise HTTPException(status_code=400, detail="Text cannot be empty")
+        raise HTTPException(status_code=400, detail="Please provide text.")
 
     try:
-        # Transform and Predict
-        vectorized_text = vectorizer.transform([request.text])
-        prediction = model.predict(vectorized_text)[0]
+        # STEP 1: Text goes into TF-IDF Vectorizer
+        # This converts your words into a numerical matrix
+        vectorized_input = vectorizer.transform([request.text])
         
-        # Labeling (Verify if 1=AI or 0=AI in your specific training)
+        # STEP 2: Matrix goes into AI Text Model
+        # The Logistic Regression model classifies the numbers
+        prediction = model.predict(vectorized_input)[0]
+        
+        # STEP 3: Return human-readable result
+        # Check your training labels (usually 1 is AI, 0 is Human)
         result_label = "AI Generated" if prediction == 1 else "Human Written"
         
         return {"result": result_label}
     
     except Exception as e:
-        return {"result": f"Error during processing: {str(e)}"}
+        return {"result": f"Error: {str(e)}"}
 
 if __name__ == "__main__":
-    # IMPORTANT: Render provides a $PORT environment variable. 
-    # This line reads that variable or defaults to 8000.
+    # Uses Render's dynamic port or defaults to 8000 for local testing
     port = int(os.environ.get("PORT", 8000))
     uvicorn.run(app, host="0.0.0.0", port=port)
